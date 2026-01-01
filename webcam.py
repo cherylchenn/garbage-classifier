@@ -3,6 +3,8 @@ import torch
 import torch.nn.functional as F
 from torchvision import models, transforms
 import mediapipe as mp
+import numpy as np
+from collections import deque
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 MODEL_PATH = "model.pth"
@@ -37,7 +39,8 @@ hands = mp_hands.Hands(
     min_tracking_confidence=0.5
 )
 
-def get_hand_roi(frame): # maybe detect item itself instead of hand
+box_history = deque(maxlen=5)
+def get_hand_roi(frame):
     h, w, _ = frame.shape
     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     result = hands.process(rgb)
@@ -54,13 +57,42 @@ def get_hand_roi(frame): # maybe detect item itself instead of hand
     ymin = int(min(ys) * h)
     ymax = int(max(ys) * h)
 
-    pad = 100 # expand box to include item in hand
-    xmin = max(0, xmin - pad)
-    ymin = max(0, ymin - pad)
-    xmax = min(w, xmax + pad)
-    ymax = min(h, ymax + pad)
+    # adaptive padding
+    pad_w = int(0.6 * (xmax-xmin))
+    pad_h = int(0.8 * (ymax-ymin))
+    
+    # fingertip forward expansion (to try to detect object better)
+    wrist_y = hand.landmark[0].y # 0
+    fingertip_y = max([ # 8, 12, 16, 20
+        hand.landmark[8].y,
+        hand.landmark[12].y,
+        hand.landmark[16].y,
+        hand.landmark[20].y
+    ])
+    # if fingertips are far from wrist, object prolly extends forward
+    forward_factor = max(0, fingertip_y - wrist_y)
+    extra_forward = int(forward_factor * h * 0.6)
 
+    xmin = max(0, xmin - pad_w)
+    ymin = max(0, ymin - pad_h)
+    xmax = min(w, xmax + pad_w)
+    ymax = min(h, ymax + pad_h + extra_forward)
+
+    # bounding box smoothing
+    box = np.array([xmin, ymin, xmax, ymax])
+    box_history.append(box)
+    smooth_box = np.mean(box_history, axis=0).astype(int)
+    xmin, ymin, xmax, ymax = smooth_box
+
+    # validate roi
+    if xmin >= xmax or ymin >= ymax:
+        return None, None
     roi = frame[ymin:ymax, xmin:xmax]
+    if roi is None or roi.size == 0:
+        return None, None
+    if roi.shape[0] < 40 or roi.shape[1] < 40:
+        return None, None
+    
     return roi, (xmin, ymin, xmax, ymax)
 
 def predict(model, roi, transform):
