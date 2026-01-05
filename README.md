@@ -12,7 +12,7 @@ This project is a real-time garbage classifcation system that detects hand-held 
 ## Installation + Usage
 1. Install dependencies: ```pip install -r requirements.txt```
 2. Train the model and create labels: ```python train.py```  
-This will create ```model.pth``` and ```labels.txt```.
+This will create ```model.pth``` and ```labels.txt``` (which are needed for the next step).
 3. Run the real-time webcam demo: ```python webcam.py```
 4. To exit, click the 'q' key.
 
